@@ -6,9 +6,6 @@ import pandas as pd
 
 
 def calcular_resultado(dados_mantidos, faces):
-    """
-    Soma Acertos, Desafios e Adaptações dos dados mantidos.
-    """
     acertos = 0
     desafios = 0
     adaptacoes = 0
@@ -35,15 +32,14 @@ def criar_tabela_resultados(contador, total_ocorrencias):
 
     for resultado, ocorrencias in contador.items():
         acertos, desafios, adaptacoes = resultado
-        probabilidade = ocorrencias / total_ocorrencias
+        probabilidade_percentual = ocorrencias / total_ocorrencias * 100
 
         linhas.append({
             "Acertos": acertos,
             "Desafios": desafios,
-            "Adaptações": adaptacoes,
-            "Ocorrências": ocorrencias,
-            "Probabilidade": probabilidade,
-            "Probabilidade (%)": probabilidade * 100
+            "Adaptacoes": adaptacoes,
+            "Ocorrencias": ocorrencias,
+            "Probabilidade_percentual": probabilidade_percentual
         })
 
     tabela = pd.DataFrame(linhas)
@@ -52,7 +48,7 @@ def criar_tabela_resultados(contador, total_ocorrencias):
         return tabela
 
     tabela = tabela.sort_values(
-        by=["Acertos", "Desafios", "Adaptações"]
+        by=["Acertos", "Desafios", "Adaptacoes"]
     ).reset_index(drop=True)
 
     return tabela
@@ -69,8 +65,45 @@ def salvar_csv(tabela, nome_arquivo, pasta="Resultados"):
         index=False,
         sep=";",
         encoding="utf-8-sig",
-        decimal=","
+        decimal=",",
+        float_format="%.10f"
     )
+
+    return caminho
+
+
+def salvar_excel(tabela, nome_arquivo, pasta="Resultados"):
+    pasta_resultados = Path(pasta)
+    pasta_resultados.mkdir(parents=True, exist_ok=True)
+
+    caminho = pasta_resultados / nome_arquivo
+
+    with pd.ExcelWriter(
+        caminho,
+        engine="openpyxl"
+    ) as writer:
+        tabela.to_excel(
+            writer,
+            index=False,
+            sheet_name="Resultados"
+        )
+
+        planilha = writer.sheets["Resultados"]
+
+        for coluna in planilha.columns:
+            maior_tamanho = 0
+            letra_coluna = coluna[0].column_letter
+
+            for celula in coluna:
+                if celula.value is not None:
+                    maior_tamanho = max(
+                        maior_tamanho,
+                        len(str(celula.value))
+                    )
+
+            planilha.column_dimensions[letra_coluna].width = (
+                maior_tamanho + 2
+            )
 
     return caminho
 
