@@ -29,29 +29,6 @@ def validar_configuracao():
             "DADOS_MANTIDOS nao pode ser maior que DADOS_ROLADOS."
         )
 
-    if configuracao.TIPO_ANALISE not in {
-        "automatica",
-        "exata",
-        "simulacao"
-    }:
-        raise ValueError(
-            "TIPO_ANALISE deve ser automatica, exata ou simulacao."
-        )
-
-    if configuracao.ERRO_MAXIMO_PERCENTUAL <= 0:
-        raise ValueError(
-            "ERRO_MAXIMO_PERCENTUAL deve ser maior que zero."
-        )
-
-    faces_esperadas = set(
-        range(1, configuracao.LADOS + 1)
-    )
-
-    if set(FACES.keys()) != faces_esperadas:
-        raise ValueError(
-            "FACES nao corresponde ao numero de lados definido."
-        )
-
 
 def margem_erro_conservadora_percentual(amostras):
     if amostras <= 0:
@@ -60,7 +37,7 @@ def margem_erro_conservadora_percentual(amostras):
     return Z_95 * sqrt(0.25 / amostras) * 100
 
 
-def calcular_custo_exato():
+def custo_exato_estimado():
     total_rolagens = (
         configuracao.LADOS ** configuracao.DADOS_ROLADOS
     )
@@ -70,9 +47,15 @@ def calcular_custo_exato():
         configuracao.DADOS_MANTIDOS
     )
 
-    avaliacoes = total_rolagens * combinacoes_por_rolagem
+    avaliacoes = (
+        total_rolagens * combinacoes_por_rolagem
+    )
 
-    return total_rolagens, combinacoes_por_rolagem, avaliacoes
+    return (
+        total_rolagens,
+        combinacoes_por_rolagem,
+        avaliacoes
+    )
 
 
 def escolher_metodo():
@@ -80,25 +63,16 @@ def escolher_metodo():
         total_rolagens,
         combinacoes_por_rolagem,
         avaliacoes
-    ) = calcular_custo_exato()
+    ) = custo_exato_estimado()
 
     if configuracao.TIPO_ANALISE == "exata":
-        return (
-            "Exata",
-            total_rolagens,
-            combinacoes_por_rolagem,
-            avaliacoes
-        )
-
-    if configuracao.TIPO_ANALISE == "simulacao":
-        return (
-            "Simulacao",
-            total_rolagens,
-            combinacoes_por_rolagem,
-            avaliacoes
-        )
-
-    if avaliacoes <= configuracao.LIMITE_AVALIACOES_EXATAS:
+        metodo = "Exata"
+    elif configuracao.TIPO_ANALISE == "simulacao":
+        metodo = "Simulacao"
+    elif (
+        avaliacoes
+        <= configuracao.LIMITE_AVALIACOES_EXATAS
+    ):
         metodo = "Exata"
     else:
         metodo = "Simulacao"
@@ -111,114 +85,32 @@ def escolher_metodo():
     )
 
 
-def gerar_distribuicao_exata():
-    contador = criar_contador()
+def escolher_melhor_combinacao(rolagem, criterio):
+    melhor_resultado = None
+    melhor_chave = None
+    melhores_dados = None
 
-    indices_possiveis = list(
-        combinations(
-            range(configuracao.DADOS_ROLADOS),
-            configuracao.DADOS_MANTIDOS
-        )
-    )
-
-    total_rolagens = (
-        configuracao.LADOS ** configuracao.DADOS_ROLADOS
-    )
-
-    combinacoes_por_rolagem = len(indices_possiveis)
-    total_ocorrencias = (
-        total_rolagens * combinacoes_por_rolagem
-    )
-
-    for rolagem in product(
-        range(1, configuracao.LADOS + 1),
-        repeat=configuracao.DADOS_ROLADOS
+    for indices in combinations(
+        range(configuracao.DADOS_ROLADOS),
+        configuracao.DADOS_MANTIDOS
     ):
-        for indices in indices_possiveis:
-            dados_mantidos = tuple(
-                rolagem[indice] for indice in indices
-            )
-
-            resultado = calcular_resultado(
-                dados_mantidos,
-                FACES
-            )
-
-            contador[resultado] += 1
-
-    if sum(contador.values()) != total_ocorrencias:
-        raise RuntimeError(
-            "A contagem exata nao corresponde ao total esperado."
+        dados = tuple(
+            rolagem[indice] for indice in indices
         )
 
-    tabela = criar_tabela_resultados(
-        contador,
-        total_ocorrencias
-    )
-
-    return (
-        tabela,
-        total_rolagens,
-        combinacoes_por_rolagem,
-        total_ocorrencias,
-        0.0
-    )
-
-
-def gerar_distribuicao_simulada():
-    contador = criar_contador()
-    rng = Random(configuracao.SEMENTE_SIMULACAO)
-
-    amostras = 0
-    margem = float("inf")
-
-    while amostras < configuracao.MAXIMO_SIMULACOES:
-        quantidade_lote = min(
-            configuracao.TAMANHO_LOTE_SIMULACAO,
-            configuracao.MAXIMO_SIMULACOES - amostras
+        resultado = calcular_resultado(
+            dados,
+            FACES
         )
 
-        for _ in range(quantidade_lote):
-            rolagem = tuple(
-                rng.randint(1, configuracao.LADOS)
-                for _ in range(configuracao.DADOS_ROLADOS)
-            )
+        chave = criterio(resultado)
 
-            indices = rng.sample(
-                range(configuracao.DADOS_ROLADOS),
-                configuracao.DADOS_MANTIDOS
-            )
+        if melhor_chave is None or chave > melhor_chave:
+            melhor_chave = chave
+            melhor_resultado = resultado
+            melhores_dados = dados
 
-            dados_mantidos = tuple(
-                rolagem[indice] for indice in indices
-            )
-
-            resultado = calcular_resultado(
-                dados_mantidos,
-                FACES
-            )
-
-            contador[resultado] += 1
-
-        amostras += quantidade_lote
-
-        margem = margem_erro_conservadora_percentual(
-            amostras
-        )
-
-        if (
-            amostras >= configuracao.MINIMO_SIMULACOES
-            and margem
-            <= configuracao.ERRO_MAXIMO_PERCENTUAL
-        ):
-            break
-
-    tabela = criar_tabela_resultados(
-        contador,
-        amostras
-    )
-
-    return tabela, amostras, 1, amostras, margem
+    return melhor_resultado, melhores_dados
 
 
 def criar_distribuicao_individual(tabela_conjunta, coluna):
@@ -322,19 +214,173 @@ def criar_chance_acumulada(tabela_acertos):
     ]
 
 
-def criar_resumo(
-    metodo,
-    total_rolagens_teoricas,
-    combinacoes_por_rolagem,
-    avaliacoes_teoricas,
-    ocorrencias_analisadas,
-    margem_erro,
-    tabela_conjunta,
-    tabela_acertos,
-    tabela_desafios,
-    tabela_adaptacoes
+def criar_tabela_faces_mantidas(
+    contador_faces,
+    total_rolagens
 ):
-    linhas = [
+    linhas = []
+
+    for face in range(1, configuracao.LADOS + 1):
+        ocorrencias = contador_faces[face]
+
+        linhas.append({
+            "Face": face,
+            "Vezes_mantida": ocorrencias,
+            "Media_por_rolagem": (
+                ocorrencias / total_rolagens
+            ),
+            "Participacao_percentual": (
+                ocorrencias
+                / (
+                    total_rolagens
+                    * configuracao.DADOS_MANTIDOS
+                )
+                * 100
+            )
+        })
+
+    return pd.DataFrame(linhas)
+
+
+def executar_rolagens(criterio, metodo):
+    contador_resultados = criar_contador()
+    contador_faces = criar_contador()
+
+    if metodo == "Exata":
+        rolagens = product(
+            range(1, configuracao.LADOS + 1),
+            repeat=configuracao.DADOS_ROLADOS
+        )
+
+        total = (
+            configuracao.LADOS
+            ** configuracao.DADOS_ROLADOS
+        )
+
+        for rolagem in rolagens:
+            resultado, dados = escolher_melhor_combinacao(
+                rolagem,
+                criterio
+            )
+
+            contador_resultados[resultado] += 1
+
+            for face in dados:
+                contador_faces[face] += 1
+
+        return (
+            contador_resultados,
+            contador_faces,
+            total,
+            0.0
+        )
+
+    rng = Random(configuracao.SEMENTE_SIMULACAO)
+    total = 0
+    margem = float("inf")
+
+    while total < configuracao.MAXIMO_SIMULACOES:
+        lote = min(
+            configuracao.TAMANHO_LOTE_SIMULACAO,
+            configuracao.MAXIMO_SIMULACOES - total
+        )
+
+        for _ in range(lote):
+            rolagem = tuple(
+                rng.randint(1, configuracao.LADOS)
+                for _ in range(configuracao.DADOS_ROLADOS)
+            )
+
+            resultado, dados = escolher_melhor_combinacao(
+                rolagem,
+                criterio
+            )
+
+            contador_resultados[resultado] += 1
+
+            for face in dados:
+                contador_faces[face] += 1
+
+        total += lote
+
+        margem = margem_erro_conservadora_percentual(
+            total
+        )
+
+        if (
+            total >= configuracao.MINIMO_SIMULACOES
+            and margem
+            <= configuracao.ERRO_MAXIMO_PERCENTUAL
+        ):
+            break
+
+    return (
+        contador_resultados,
+        contador_faces,
+        total,
+        margem
+    )
+
+
+def analisar_jogador(
+    nome_estrategia,
+    criterio,
+    nome_arquivo
+):
+    validar_configuracao()
+
+    (
+        metodo,
+        total_rolagens_teoricas,
+        combinacoes_por_rolagem,
+        avaliacoes_teoricas
+    ) = escolher_metodo()
+
+    (
+        contador_resultados,
+        contador_faces,
+        total_analisado,
+        margem_erro
+    ) = executar_rolagens(
+        criterio,
+        metodo
+    )
+
+    tabela_conjunta = criar_tabela_resultados(
+        contador_resultados,
+        total_analisado
+    )
+
+    tabela_acertos = criar_distribuicao_individual(
+        tabela_conjunta,
+        "Acertos"
+    )
+
+    tabela_desafios = criar_distribuicao_individual(
+        tabela_conjunta,
+        "Desafios"
+    )
+
+    tabela_adaptacoes = criar_distribuicao_individual(
+        tabela_conjunta,
+        "Adaptacoes"
+    )
+
+    tabela_chance = criar_chance_acumulada(
+        tabela_acertos
+    )
+
+    tabela_faces = criar_tabela_faces_mantidas(
+        contador_faces,
+        total_analisado
+    )
+
+    linhas_resumo = [
+        {
+            "Secao": "Configuracao",
+            "Metrica": "Estrategia",
+            "Valor": nome_estrategia
+        },
         {
             "Secao": "Configuracao",
             "Metrica": "Dados_rolados",
@@ -344,11 +390,6 @@ def criar_resumo(
             "Secao": "Configuracao",
             "Metrica": "Dados_mantidos",
             "Valor": configuracao.DADOS_MANTIDOS
-        },
-        {
-            "Secao": "Configuracao",
-            "Metrica": "Lados_do_dado",
-            "Valor": configuracao.LADOS
         },
         {
             "Secao": "Metodo",
@@ -372,8 +413,8 @@ def criar_resumo(
         },
         {
             "Secao": "Metodo",
-            "Metrica": "Ocorrencias_analisadas",
-            "Valor": ocorrencias_analisadas
+            "Metrica": "Rolagens_analisadas",
+            "Valor": total_analisado
         },
         {
             "Secao": "Metodo",
@@ -400,72 +441,14 @@ def criar_resumo(
         )
 
         for metrica, valor in estatisticas.items():
-            linhas.append({
+            linhas_resumo.append({
                 "Secao": nome,
                 "Metrica": metrica,
                 "Valor": valor
             })
 
-    return pd.DataFrame(linhas)
-
-
-def analisar_probabilidades():
-    validar_configuracao()
-
-    (
-        metodo,
-        total_rolagens_teoricas,
-        combinacoes_por_rolagem,
-        avaliacoes_teoricas
-    ) = escolher_metodo()
-
-    if metodo == "Exata":
-        (
-            tabela_conjunta,
-            _,
-            _,
-            ocorrencias_analisadas,
-            margem_erro
-        ) = gerar_distribuicao_exata()
-    else:
-        (
-            tabela_conjunta,
-            _,
-            _,
-            ocorrencias_analisadas,
-            margem_erro
-        ) = gerar_distribuicao_simulada()
-
-    tabela_acertos = criar_distribuicao_individual(
-        tabela_conjunta,
-        "Acertos"
-    )
-
-    tabela_desafios = criar_distribuicao_individual(
-        tabela_conjunta,
-        "Desafios"
-    )
-
-    tabela_adaptacoes = criar_distribuicao_individual(
-        tabela_conjunta,
-        "Adaptacoes"
-    )
-
-    tabela_chance = criar_chance_acumulada(
-        tabela_acertos
-    )
-
-    tabela_resumo = criar_resumo(
-        metodo,
-        total_rolagens_teoricas,
-        combinacoes_por_rolagem,
-        avaliacoes_teoricas,
-        ocorrencias_analisadas,
-        margem_erro,
-        tabela_conjunta,
-        tabela_acertos,
-        tabela_desafios,
-        tabela_adaptacoes
+    tabela_resumo = pd.DataFrame(
+        linhas_resumo
     )
 
     nome_pasta = (
@@ -475,7 +458,7 @@ def analisar_probabilidades():
     )
 
     caminho = (
-        f"Resultados/{nome_pasta}/analise.xlsx"
+        f"Resultados/{nome_pasta}/{nome_arquivo}"
     )
 
     tabelas = {
@@ -484,7 +467,8 @@ def analisar_probabilidades():
         "Acertos": tabela_acertos,
         "Desafios": tabela_desafios,
         "Adaptacoes": tabela_adaptacoes,
-        "Chance_acumulada": tabela_chance
+        "Chance_acumulada": tabela_chance,
+        "Faces_mantidas": tabela_faces
     }
 
     percentuais = {
@@ -498,6 +482,9 @@ def analisar_probabilidades():
             "Chance_exatamente_percentual",
             "Chance_pelo_menos_percentual",
             "Chance_menos_que_percentual"
+        ],
+        "Faces_mantidas": [
+            "Participacao_percentual"
         ]
     }
 
@@ -507,12 +494,9 @@ def analisar_probabilidades():
         percentuais
     )
 
-    print("Analise concluida.")
+    print(f"Analise do jogador {nome_estrategia} concluida.")
     print(f"Metodo: {metodo}")
-    print(
-        f"Ocorrencias analisadas: "
-        f"{ocorrencias_analisadas}"
-    )
+    print(f"Rolagens analisadas: {total_analisado}")
     print(
         f"Margem de erro conservadora: "
         f"+/- {margem_erro:.4f} ponto percentual"
@@ -526,9 +510,6 @@ def analisar_probabilidades():
         "desafios": tabela_desafios,
         "adaptacoes": tabela_adaptacoes,
         "chance_acumulada": tabela_chance,
+        "faces_mantidas": tabela_faces,
         "caminho": arquivo
     }
-
-
-if __name__ == "__main__":
-    analisar_probabilidades()
